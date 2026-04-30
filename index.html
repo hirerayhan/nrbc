@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit Data Search</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for processing Excel files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: '#0a0a0a',
+                        neon: '#00ff88',
+                        glass: 'rgba(255, 255, 255, 0.05)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0a0a0a;
+            color: #e5e7eb;
+            -webkit-font-smoothing: antialiased;
+        }
+        .glass-panel {
+            background-color: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+        .input-neon:focus {
+            outline: none;
+            border-color: #00ff88;
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00ff88;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col relative overflow-x-hidden font-sans">
+    <!-- Glow Effect -->
+    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-96 bg-neon opacity-10 blur-[120px] rounded-full pointer-events-none z-0"></div>
+
+    <main class="flex-grow container mx-auto px-4 py-12 relative z-10 flex flex-col items-center">
+        
+        <!-- Header -->
+        <div class="text-center mb-8 w-full">
+            <h1 class="text-4xl md:text-5xl font-bold mb-3 tracking-tight text-white">
+                Audit <span class="text-neon drop-shadow-[0_0_12px_rgba(0,255,136,0.4)]">Database</span>
+            </h1>
+            <p class="text-gray-400 text-base md:text-lg max-w-2xl mx-auto">
+                Real-time searchable registry for tax audit selections.
+            </p>
+        </div>
+
+        <!-- Data Loading Status -->
+        <div id="loadingStatus" class="mb-6 flex flex-col items-center gap-3">
+            <div class="w-8 h-8 border-4 border-neon border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-neon animate-pulse" id="loadingText">Fetching all data from GitHub...</p>
+        </div>
+
+        <!-- Manual File Upload (Fallback) -->
+        <div id="manualUpload" class="hidden mb-6 w-full max-w-md glass-panel p-4 rounded-xl text-center">
+            <p class="text-yellow-400 text-sm mb-2">GitHub theke auto load failed. Doya kore manually file ta upload korun:</p>
+            <input type="file" id="excelUpload" accept=".xlsx, .xls, .csv" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-neon file:text-dark hover:file:bg-green-400 transition-colors cursor-pointer">
+        </div>
+
+        <!-- Search Bar -->
+        <div class="w-full max-w-4xl glass-panel rounded-2xl p-4 md:p-6 mb-8 transition-all hidden" id="searchSection">
+            <div class="flex flex-col md:flex-row gap-4 items-center">
+                <div class="relative flex-grow w-full">
+                    <svg class="w-6 h-6 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <input type="text" id="searchInput" 
+                        class="w-full bg-white/5 border border-white/10 text-white rounded-xl pl-14 pr-4 py-4 text-lg input-neon transition-all placeholder-gray-500" 
+                        placeholder="Enter exact 12-digit TIN number..." maxlength="12">
+                </div>
+                <button id="searchBtn" class="w-full md:w-auto px-8 py-4 bg-neon text-dark font-bold rounded-xl hover:bg-green-400 transition-colors whitespace-nowrap">
+                    Search
+                </button>
+            </div>
+            <p class="text-sm text-gray-400 mt-3 ml-2">* Privacy protected: Search only works with an exact TIN.</p>
+        </div>
+
+        <!-- Data Table -->
+        <div class="w-full max-w-5xl glass-panel rounded-2xl overflow-hidden flex flex-col hidden" id="tableSection">
+            <div class="overflow-x-auto" id="tableContainer">
+                <table class="w-full text-left border-collapse min-w-[600px]">
+                    <thead>
+                        <tr class="bg-white/5 border-b border-white/10 text-neon text-sm uppercase tracking-wider">
+                            <th class="p-4 font-semibold">Name of Taxpayer</th>
+                            <th class="p-4 font-semibold">TIN</th>
+                            <th class="p-4 font-semibold">Taxes Zone</th>
+                            <th class="p-4 font-semibold">Year</th>
+                            <th class="p-4 font-semibold">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-white/5 text-sm md:text-base">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="hidden py-12 text-center text-gray-500">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <p>No matching record found for this TIN.</p>
+            </div>
+        </div>
+        
+    </main>
+
+    <footer class="py-6 text-center text-gray-600 text-sm border-t border-white/5 relative z-10 mt-auto">
+        &copy; 2024 Audit DB System. Auto-sync with GitHub data.
+    </footer>
+
+    <script>
+        let realData = [];
+        let filteredData = [];
+
+        const githubRawUrl = "https://raw.githubusercontent.com/hirerayhan/my-photos/main/AUDIT_SELECTION_2023-24.xlsx";
+
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const tableBody = document.getElementById('tableBody');
+        const emptyState = document.getElementById('emptyState');
+        const tableContainer = document.getElementById('tableContainer');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const searchSection = document.getElementById('searchSection');
+        const tableSection = document.getElementById('tableSection');
+        const manualUpload = document.getElementById('manualUpload');
+        const excelUpload = document.getElementById('excelUpload');
+
+        // Fetch data from GitHub automatically
+        async function fetchExcelData() {
+            try {
+                const response = await fetch(githubRawUrl);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const arrayBuffer = await response.arrayBuffer();
+                processExcelFile(arrayBuffer);
+            } catch (error) {
+                console.error("Auto fetch failed:", error);
+                loadingStatus.classList.add('hidden');
+                manualUpload.classList.remove('hidden');
+            }
+        }
+
+        // Process array buffer to JSON
+        function processExcelFile(buffer) {
+            try {
+                const workbook = XLSX.read(buffer, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const rawJson = XLSX.utils.sheet_to_json(worksheet);
+
+                // Dynamically map columns based on likely headers
+                realData = rawJson.map((row, index) => {
+                    const keys = Object.keys(row);
+                    const getVal = (keywords) => {
+                        const key = keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw)));
+                        return key ? row[key] : null;
+                    };
+
+                    return {
+                        id: index + 1,
+                        name: getVal(['name', 'nam']) || row[keys[2]] || 'Unknown',
+                        tin: getVal(['tin']) || row[keys[1]] || 'N/A',
+                        zone: getVal(['zone', 'circle', 'taxes']) || row[keys[3]] || 'N/A',
+                        year: getVal(['year']) || '2023-2024',
+                    status: getVal(['status']) || 'Selected'
+                };
+            }).filter(item => item.tin !== 'N/A' || item.name !== 'Unknown'); // Filter out empty rows
+
+            filteredData = []; // Keep it empty initially for privacy
+            
+            // Show UI
+            loadingStatus.classList.add('hidden');
+            manualUpload.classList.add('hidden');
+            searchSection.classList.remove('hidden');
+
+        } catch (error) {
+            console.error("Error processing Excel:", error);
+                alert("Excel file ta parse kora jacche na. Thik formater file kina check korun.");
+            }
+        }
+
+        // File Input Fallback
+        excelUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            loadingStatus.classList.remove('hidden');
+            document.getElementById('loadingText').innerText = "Processing File...";
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                processExcelFile(data);
+            };
+            reader.readAsArrayBuffer(file);
+    });
+
+    function renderTable() {
+        tableBody.innerHTML = '';
+        tableSection.classList.remove('hidden');
+        
+        if (filteredData.length === 0) {
+            emptyState.classList.remove('hidden');
+            tableContainer.classList.add('hidden');
+            return;
+        }
+
+        emptyState.classList.add('hidden');
+        tableContainer.classList.remove('hidden');
+
+        filteredData.forEach(item => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-white/5 transition-colors group';
+            
+            // Formating TIN safely
+            const displayTin = item.tin ? item.tin.toString().padStart(12, '0') : 'N/A';
+
+            row.innerHTML = `
+                <td class="p-4 font-medium text-white group-hover:text-neon transition-colors">${item.name}</td>
+                <td class="p-4 text-gray-300 tracking-wider">${displayTin}</td>
+                <td class="p-4 text-gray-400">${item.zone}</td>
+                <td class="p-4 text-gray-400">${item.year}</td>
+                <td class="p-4">
+                    <span class="px-3 py-1 text-xs rounded-full border bg-green-500/10 border-green-500/20 text-green-400">
+                        ${item.status}
+                    </span>
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+
+    function handleSearch() {
+        const query = searchInput.value.trim();
+        if (!query) return;
+        
+        // Exact TIN match for privacy
+        filteredData = realData.filter(item => {
+            const itemTin = item.tin ? item.tin.toString().padStart(12, '0') : '';
+            return itemTin === query;
+        });
+        
+        renderTable();
+    }
+
+    searchBtn.addEventListener('click', handleSearch);
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleSearch();
+    });
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', fetchExcelData);
+</script>
+</body>
+</html>
